@@ -7,6 +7,7 @@ struct VigilView: View {
     var holdPreview: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
     @AppStorage(Prefs.lid, store: Prefs.store) private var lid = true
+    @State private var copied = false
 
     var body: some View {
         let panel = KitPanel(title: "Vigil", width: 340, trailing: {
@@ -41,7 +42,7 @@ struct VigilView: View {
             }
             .onChange(of: model.custom) { _, _ in model.selected = Presets.custom }
             KitSection { KitToggleRow(title: "Stay awake with the lid closed", isOn: $lid) }
-            WideButton(title: "Start", kind: .primary) { model.start() }
+            WideButton(title: "Start", kind: .primary) { model.start() }.keyboardShortcut(.defaultAction)   // Return starts
         }
     }
 
@@ -80,9 +81,11 @@ struct VigilView: View {
                     KitLed(color: KitColor.amber)
                     Text("Lid mode needs a one-time setup").font(KitFont.body).foregroundStyle(KitColor.text)
                 }
-                WideButton(title: "Copy setup command", kind: .secondary) {
+                WideButton(title: copied ? "Copied" : "Copy setup command", kind: .secondary) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(LidCommand.setup, forType: .string)
+                    copied = true
+                    Task { try? await Task.sleep(for: .seconds(2)); copied = false }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).transition(.kitRow)
         }

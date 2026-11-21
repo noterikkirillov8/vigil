@@ -79,6 +79,7 @@ struct SettingsView: View {
         }
         .kitAccent(Prefs.accent)
         .onChange(of: hotKey) { _, k in HotKeyPref.save(k); model.onHotKey(k) }
+        .onChange(of: defaultMinutes) { _, _ in model.applyDefaultLength() }
         .onChange(of: showTime) { _, _ in model.onStatus() }
         .onChange(of: followAgents) { _, _ in model.configureAgentPolling() }
         .onChange(of: phonePings) { _, _ in model.configureAgentPolling() }
@@ -185,6 +186,7 @@ struct LidSettings: View {
 }
 
 struct PhoneSettings: View {
+    @State private var copied = false
     @Binding var enabled: Bool
     let topic: String
     @Binding var includeNames: Bool
@@ -194,10 +196,12 @@ struct PhoneSettings: View {
             KitToggleRow(title: "Send pings to my phone", isOn: $enabled)
             if enabled {
                 KitRow(title: "Topic", detail: topic) {
-                    Button("Copy link") {
+                    Button(copied ? "Copied" : "Copy link") {
                         guard let link = PhonePing.link(topic) else { return }
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(link.absoluteString, forType: .string)
+                        copied = true
+                        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
                     }.buttonStyle(.kitSecondary)
                 }
                 KitToggleRow(title: "Include project names", isOn: $includeNames)

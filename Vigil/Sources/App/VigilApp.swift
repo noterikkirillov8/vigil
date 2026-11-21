@@ -5,7 +5,8 @@ import SwiftUI
 /// One borderless panel for the app's whole life; opening it is just `orderFront`.
 final class VigilPanel: NSPanel {
     override var canBecomeKey: Bool { true }
-    override func cancelOperation(_ sender: Any?) { orderOut(nil) }
+    var onCancel: () -> Void = {}
+    override func cancelOperation(_ sender: Any?) { onCancel() }   // the same close as a click outside, so state and the mouse monitor are cleaned up
 }
 
 @main
@@ -84,6 +85,7 @@ final class VigilApp: NSObject, NSApplicationDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
+        panel.onCancel = { [weak self] in self?.hide() }
         host = NSHostingView(rootView: VigilView(model: model, onHeight: { [weak self] h in self?.resize(to: h) }))
         host.sizingOptions = []
         panel.contentView = host

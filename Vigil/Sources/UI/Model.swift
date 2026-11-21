@@ -10,7 +10,7 @@ enum Prefs {
     nonisolated(unsafe) static let store: UserDefaults = Demo.on ? Demo.store() : .standard
     static let followAgents = "vigilFollowAgents", sleepWhileWaiting = "vigilSleepWhileWaiting"
     static let lidSaver = "vigilLidSaver", heatGuard = "vigilHeatGuard"
-    static let nightly = "vigilNightly", nightFrom = "vigilNightFrom", nightTo = "vigilNightTo"
+    static let nightLast = "vigilNightLast", nightly = "vigilNightly", nightFrom = "vigilNightFrom", nightTo = "vigilNightTo"
     static let phonePings = "vigilPhonePings", phoneTopic = "vigilPhoneTopic", includeNames = "vigilIncludeProjectNames"
 
     static func register() {
@@ -50,6 +50,7 @@ final class VigilModel {
     @ObservationIgnored private let controller: SessionController?
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var awayFired = false
+    @ObservationIgnored private var lastMenuText: String?
     @ObservationIgnored private var agentPoll: Task<Void, Never>?
     @ObservationIgnored private var agentFollow = AgentFollow()
     @ObservationIgnored private var waitPings = WaitPings()
@@ -80,6 +81,13 @@ final class VigilModel {
     }
 
     var running: Bool { session != nil }
+
+    /// Settings changed the default length: the idle panel follows it (a running session is untouched).
+    func applyDefaultLength() {
+        let d = Prefs.int(Prefs.defaultMinutes)
+        guard !running else { return }
+        if Presets.minutes.contains(d) { selected = d } else { custom = Presets.snap(d); selected = Presets.custom }
+    }
 
     func start() {
         guard let c = controller, !running else { return }
@@ -124,9 +132,12 @@ final class VigilModel {
         guard let controller, Prefs.bool(Prefs.nightly) else { return }
         let date = Date(), floor = Prefs.int(Prefs.floor)
         let schedule = NightSchedule(from: Prefs.int(Prefs.nightFrom), to: Prefs.int(Prefs.nightTo))
-        guard let end = schedule.endIfDue(at: date, calendar: .current, running: running, battery: Sys.battery(), floor: floor) else { return }
+        let last = Prefs.store.object(forKey: Prefs.nightLast) as? Date
+        guard let night = schedule.pending(at: date, calendar: .current, lastRun: last) else { return }
+        Prefs.store.set(night.start, forKey: Prefs.nightLast)   // started or skipped, tonight is handled
+        guard !schedule.skips(running: running, battery: Sys.battery(), floor: floor) else { return }
         awayFired = false
-        controller.start(Session(start: date, scheduledEnd: end), lid: Prefs.bool(Prefs.lid), display: Prefs.bool(Prefs.display))
+        controller.start(Session(start: date, scheduledEnd: night.end), lid: Prefs.bool(Prefs.lid), display: Prefs.bool(Prefs.display))
         refreshSafetyHelper(); sync()
     }
 
@@ -197,6 +208,7 @@ final class VigilModel {
     private func sync() {
         guard let c = controller else { return }
         session = c.session; lidActive = c.lidActive; lidFailed = c.lidFailed; now = Date()
+        lastMenuText = session.map { Session.menuText($0.remaining(now: now)) }
         refreshLidGuard()
         onStatus()
         reschedule()
@@ -205,7 +217,7 @@ final class VigilModel {
     private func reschedule() {
         timer?.invalidate(); timer = nil
         guard let s = session else { return }
-        let iv = Ticker.interval(visible: isOpen || Prefs.bool(Prefs.showTime), remaining: s.remaining(now: Date()))
+        let iv = Ticker.interval(panelOpen: isOpen, showTime: Prefs.bool(Prefs.showTime), remaining: s.remaining(now: Date()))
         let t = Timer(timeInterval: iv, repeats: false) { [weak self] _ in MainActor.assumeIsolated { self?.tick() } }
         t.tolerance = iv * 0.1
         RunLoop.main.add(t, forMode: .common)
@@ -224,7 +236,9 @@ final class VigilModel {
         }
         if Prefs.bool(Prefs.away), !Demo.on { awayCheck() }
         now = Date()
-        onStatus()
+        // The menu bar text only changes on a minute boundary: redraw only then.
+        let text = session.map { Session.menuText($0.remaining(now: now)) }
+        if text != lastMenuText { lastMenuText = text; onStatus() }
         reschedule()
     }
 

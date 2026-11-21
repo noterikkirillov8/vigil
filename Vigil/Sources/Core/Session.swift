@@ -58,7 +58,14 @@ enum Presets {
     static func long(_ m: Int) -> String { m % 60 == 0 ? "\(m / 60) h" : m < 60 ? "\(m) min" : "\(m / 60) h \(m % 60) min" }
 }
 
-/// How often the owner should tick: every second while something shows the time, otherwise coarse but never late.
+/// How often the owner should tick: every second while the panel is open, otherwise coarse (never late for the end,
+/// the battery floor or away checks) and aligned so the menu bar minute changes exactly when it should.
 enum Ticker {
-    static func interval(visible: Bool, remaining: TimeInterval) -> TimeInterval { visible ? 1 : max(1, min(15, remaining)) }
+    static func interval(panelOpen: Bool, showTime: Bool, remaining: TimeInterval) -> TimeInterval {
+        if panelOpen { return 1 }
+        let coarse = max(1, min(15, remaining))
+        guard showTime else { return coarse }
+        let toMinute = remaining.truncatingRemainder(dividingBy: 60)
+        return min(coarse, (toMinute == 0 ? 60 : toMinute) + 0.1)
+    }
 }

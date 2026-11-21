@@ -6,18 +6,36 @@ struct NightSchedule {
     var from: Int
     var to: Int
 
-    func endIfDue(at now: Date, calendar: Calendar, running: Bool, battery: @autoclosure () -> BatteryState?, floor: Int) -> Date? {
-        guard !running, from != to, (0..<1440).contains(from), (0..<1440).contains(to) else { return nil }
-        let today = calendar.startOfDay(for: now)
+    /// The night window that contains `now` and has not been handled yet (`lastRun` is the start of the last handled window).
+    /// Catches up: a Mac that wakes or an app that starts inside the window still gets tonight's session, ending at the window end.
+    func pending(at now: Date, calendar: Calendar, lastRun: Date?) -> (start: Date, end: Date)? {
+        guard from != to, (0..<1440).contains(from), (0..<1440).contains(to) else { return nil }
         func time(_ minutes: Int, on day: Date) -> Date? {
             calendar.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day,
                           matchingPolicy: .nextTime, repeatedTimePolicy: .first, direction: .forward)
         }
-        guard let start = time(from, on: today), now >= start, now.timeIntervalSince(start) < 60,
-              let endDay = calendar.date(byAdding: .day, value: to < from ? 1 : 0, to: today),
-              let end = time(to, on: endDay), end > now else { return nil }
-        if floor > 0, let battery = battery(), Battery.floorHit(onBattery: battery.onBattery, percent: battery.percent, floor: floor) { return nil }
-        return end
+        let today = calendar.startOfDay(for: now)
+        var startDay = today
+        guard var start = time(from, on: today) else { return nil }
+        if start > now {
+            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: today), let s = time(from, on: yesterday) else { return nil }
+            startDay = yesterday; start = s
+        }
+        guard let endDay = calendar.date(byAdding: .day, value: to < from ? 1 : 0, to: startDay),
+              let end = time(to, on: endDay), end > now, lastRun.map({ $0 < start }) ?? true else { return nil }
+        return (start, end)
+    }
+
+    /// Whether a pending night should be skipped: something is already running, or the battery is at or below the floor.
+    func skips(running: Bool, battery: @autoclosure () -> BatteryState?, floor: Int) -> Bool {
+        if running { return true }
+        if floor > 0, let b = battery(), Battery.floorHit(onBattery: b.onBattery, percent: b.percent, floor: floor) { return true }
+        return false
+    }
+
+    func endIfDue(at now: Date, calendar: Calendar, running: Bool, battery: @autoclosure () -> BatteryState?, floor: Int, lastRun: Date? = nil) -> Date? {
+        guard let w = pending(at: now, calendar: calendar, lastRun: lastRun), !skips(running: running, battery: battery(), floor: floor) else { return nil }
+        return w.end
     }
 }
 

@@ -128,6 +128,11 @@ final class SessionController {
             if let pid = watchdogPid { power.killWatchdog(pid) }
             watchdogPid = nil
             state.clear()
+        } else if let new = power.spawnWatchdog(script: Watchdog.script(appPid: pid, end: Date())) {
+            // Restore failed: a fresh watchdog retries within a minute instead of waiting for the old session end.
+            if let old = watchdogPid { power.killWatchdog(old) }
+            watchdogPid = new
+            state.write(LidState(end: Date(), watchdogPid: new))
         }
     }
 

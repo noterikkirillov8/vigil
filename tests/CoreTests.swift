@@ -62,8 +62,10 @@ struct CoreTests {
         check(Presets.label(30) == "30 min" && Presets.label(120) == "2 h" && Presets.label(Presets.custom) == "Custom", "presets: labels")
         check(Presets.snap(20) == 15 && Presets.snap(23) == 30 && Presets.snap(5) == 15 && Presets.snap(9999) == 1440, "presets: custom snaps to 15 min, 15 min to 24 h")
         check(Presets.long(135) == "2 h 15 min" && Presets.long(45) == "45 min" && Presets.long(1440) == "24 h", "presets: long text")
-        check(Ticker.interval(visible: true, remaining: 500) == 1 && Ticker.interval(visible: false, remaining: 500) == 15
-              && Ticker.interval(visible: false, remaining: 4) == 4 && Ticker.interval(visible: false, remaining: 0.2) == 1, "ticker: 1 s when visible, coarse but never late otherwise")
+        check(Ticker.interval(panelOpen: true, showTime: true, remaining: 500) == 1 && Ticker.interval(panelOpen: false, showTime: false, remaining: 500) == 15
+              && Ticker.interval(panelOpen: false, showTime: false, remaining: 4) == 4 && Ticker.interval(panelOpen: false, showTime: false, remaining: 0.2) == 1, "ticker: 1 s with the panel open, coarse but never late otherwise")
+        check(abs(Ticker.interval(panelOpen: false, showTime: true, remaining: 500) - 15) < 0.001 && abs(Ticker.interval(panelOpen: false, showTime: true, remaining: 3 * 60 + 0.4) - 0.5) < 0.001
+              && Ticker.interval(panelOpen: false, showTime: true, remaining: 180) == 15 && Ticker.interval(panelOpen: false, showTime: true, remaining: 4) == 4, "ticker: menu bar time wakes on the minute boundary, never later than 15 s")
 
         // exact commands
         check(LidCommand.on == ["/usr/bin/sudo", "-n", "/usr/bin/pmset", "-a", "disablesleep", "1"], "lid: exact argv on")
@@ -138,7 +140,9 @@ struct CoreTests {
         c.start(length: 3600, now: t0, lid: true, display: false)
         p.lidOK = false
         c.end()
-        check(f.exists && !p.log.contains("kill:901") && c.session == nil, "restore fails: state file and watchdog stay for the next try")
+        check(f.exists && c.session == nil, "restore fails: state file stays for the next try")
+        check(p.log.count >= 2 && p.log[p.log.count - 2].hasPrefix("spawn:") && p.log[p.log.count - 2].hasSuffix(LidCommand.off.joined(separator: " ")) && p.log.last == "kill:901", "restore fails: a fresh watchdog (same off command) replaces the old one")
+        check((try? JSONDecoder().decode(LidState.self, from: Data(contentsOf: f.url)))?.watchdogPid == 902, "restore fails: state file points at the fresh watchdog")
 
         // crash recovery
         (c, p, a, f) = make("f.json")
@@ -191,19 +195,25 @@ struct CoreTests {
         let iso = ISO8601DateFormatter()
         func date(_ text: String) -> Date { iso.date(from: text)! }
         let night = NightSchedule(from: 22 * 60, to: 7 * 60)
-        func end(_ start: String, _ schedule: NightSchedule = night, running: Bool = false, battery: BatteryState? = nil) -> Date? {
-            schedule.endIfDue(at: date(start), calendar: calendar, running: running, battery: battery, floor: 10)
+        func end(_ start: String, _ schedule: NightSchedule = night, running: Bool = false, battery: BatteryState? = nil, lastRun: Date? = nil) -> Date? {
+            schedule.endIfDue(at: date(start), calendar: calendar, running: running, battery: battery, floor: 10, lastRun: lastRun)
         }
         let start = "2026-01-16T03:00:00Z", morning = date("2026-01-16T12:00:00Z")
         check(end(start) == morning && end("2026-01-16T03:00:12Z") == morning, "night: crosses midnight and keeps the exact local deadline")
-        check(end("2026-01-16T02:59:59Z") == nil && end("2026-01-16T03:01:00Z") == nil, "night: no early start or catch-up after From")
+        check(end("2026-01-16T02:59:59Z") == nil, "night: no start before From")
+        check(end("2026-01-16T03:01:00Z") == morning && end("2026-01-16T10:00:00Z") == morning, "night: a late wake or launch inside the window catches up, ending at the window end")
+        check(end("2026-01-16T03:01:00Z", lastRun: date(start)) == nil && end("2026-01-16T10:00:00Z", lastRun: date(start)) == nil, "night: a handled night does not start again")
+        check(end("2026-01-16T12:00:00Z") == nil && end("2026-01-16T20:00:00Z") == nil, "night: no catch-up after the window end")
+        check(end("2026-01-16T03:01:00Z", lastRun: date("2026-01-15T03:00:00Z")) == morning, "night: last night's run does not block tonight")
+        let pendingNight = night.pending(at: date("2026-01-16T10:00:00Z"), calendar: calendar, lastRun: nil)
+        check(pendingNight?.start == date(start) && pendingNight?.end == morning, "night: pending window after midnight belongs to the evening start")
         check(end(start, running: true) == nil && end(start, battery: BatteryState(onBattery: true, percent: 10)) == nil
               && end(start, battery: BatteryState(onBattery: false, percent: 8)) == morning, "night: skips busy and low-battery starts, allows AC")
         check(end(start, NightSchedule(from: 1320, to: 1320)) == nil, "night: equal times do not start a session")
         let usual = NightSchedule(from: 60, to: 420)
         check(end("2026-03-08T06:00:00Z", usual) == date("2026-03-08T11:00:00Z"), "night: spring forward keeps 07:00 after five elapsed hours")
         check(end("2026-03-08T07:00:00Z", NightSchedule(from: 150, to: 420)) == date("2026-03-08T11:00:00Z"), "night: missing 02:30 starts at 03:00")
-        check(end("2026-11-01T05:00:00Z", usual) == date("2026-11-01T12:00:00Z") && end("2026-11-01T06:00:00Z", usual) == nil,
+        check(end("2026-11-01T05:00:00Z", usual) == date("2026-11-01T12:00:00Z") && end("2026-11-01T06:00:00Z", usual, lastRun: date("2026-11-01T05:00:00Z")) == nil,
               "night: fall back starts only on the first 01:00")
         let longStart = "2026-10-31T11:15:00Z", longEnd = date("2026-11-01T12:00:00Z")
         let scheduled = end(longStart, NightSchedule(from: 435, to: 420)).map { Session(start: date(longStart), scheduledEnd: $0) }
