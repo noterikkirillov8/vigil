@@ -1,0 +1,77 @@
+name: Vigil
+options:
+  bundleIdPrefix: com.erikkirillov
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_STYLE: Manual
+    OTHER_SWIFT_FLAGS: "-strict-concurrency=complete"
+    SWIFT_EMIT_LOC_STRINGS: NO
+  configs:
+    Debug:
+      CODE_SIGNING_REQUIRED: NO
+      CODE_SIGNING_ALLOWED: NO
+    # Release: "Erik Local Signing" when present; scripts/install.sh falls back to ad-hoc (-) otherwise.
+    # For a plain xcodebuild without that identity, add CODE_SIGN_IDENTITY=- to the command.
+    Release:
+      CODE_SIGNING_REQUIRED: YES
+      CODE_SIGNING_ALLOWED: YES
+      CODE_SIGN_IDENTITY: "Erik Local Signing"
+      DEAD_CODE_STRIPPING: YES
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: wholemodule
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+      STRIP_INSTALLED_PRODUCT: YES
+      CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+
+schemes:
+  Vigil:
+    build:
+      targets:
+        Vigil: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+targets:
+  Vigil:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+        type: group
+      - path: Resources/Assets.xcassets
+      - path: Resources/Sounds
+        type: folder
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleName: Vigil
+        CFBundleDisplayName: Vigil
+        CFBundleIdentifier: com.erikkirillov.Vigil
+        CFBundleVersion: "1"
+        CFBundleShortVersionString: "1.0.0"
+        CFBundlePackageType: APPL
+        LSUIElement: YES
+        NSHighResolutionCapable: YES
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.erikkirillov.Vigil
+        PRODUCT_NAME: Vigil
+        INFOPLIST_FILE: Resources/Info.plist
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_SANDBOX: NO
+      configs:
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"

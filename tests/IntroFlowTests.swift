@@ -1,0 +1,31 @@
+import Foundation
+
+/// Headless checks of the intro state machine. `check` is the host test's own reporter.
+func introFlowChecks(_ check: (Bool, String) -> Void) {
+    var f = IntroFlow(durations: [4, 4, 4, 4, 4], now: 10)
+    check(f.scene == 0 && !f.closed && !f.seen && f.count == 5, "intro: starts on scene 0, open, unseen")
+    check(!f.tick(now: 13.9) && f.scene == 0, "intro: no advance before the scene duration")
+    check(f.tick(now: 14.0) && f.scene == 1 && f.time(now: 14.5) == 0.5, "intro: auto-advance resets the scene clock")
+    f.next(now: 14.6); f.next(now: 14.6); f.next(now: 14.6)
+    check(f.scene == 4 && f.isLast && !f.closed, "intro: rapid Next steps once each and stops on the last scene")
+    check(!f.tick(now: 100) && f.scene == 4 && !f.closed, "intro: the last scene waits for the user")
+    f.back(now: 15); f.back(now: 15)
+    check(f.scene == 2 && f.time(now: 15) == 0, "intro: Back steps and restarts the clock")
+    check(!f.tick(now: 15.5) && f.scene == 2, "intro: a stale tick cannot double-advance after Back")
+    let g = f.generation; f.next(now: 16)
+    check(f.generation == g + 1, "intro: every scene change bumps the generation")
+    var s = IntroFlow(durations: [4, 4, 4], now: 0)
+    s.next(now: 1); s.close()
+    check(s.closed && s.seen, "intro: skip closes and marks seen")
+    s.next(now: 2); s.back(now: 2)
+    check(!s.tick(now: 99) && s.scene == 1, "intro: nothing moves after close")
+    var l = IntroFlow(durations: [4, 4], now: 0)
+    l.next(now: 1); l.next(now: 1)
+    check(l.closed && l.seen, "intro: Get started on the last scene closes and marks seen")
+    var b = IntroFlow(durations: [4, 4], now: 0)
+    b.back(now: 1)
+    check(b.scene == 0 && !b.closed, "intro: Back on the first scene does nothing")
+    var e = IntroFlow(durations: [4, 4], now: 0)
+    e.markSeen()
+    check(e.seen && !e.closed, "intro: showing marks seen without closing")
+}
